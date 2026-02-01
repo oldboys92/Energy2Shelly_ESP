@@ -21,12 +21,14 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
 #include <ModbusIP_ESP8266.h>
+#include <sml.h>
 
 #define DEBUG true // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
 
 unsigned long startMillis = 0;
 unsigned long startMillis_sunspec = 0;
+unsigned long startMillis_tibberpulse = 0;
 unsigned long currentMillis;
 
 // for getting time
@@ -58,6 +60,10 @@ char modbus_dev[10] = "71"; // default for KSEM
 char shelly_port[6] = "2220"; // old: 1010; new (FW>=226): 2220
 char phase_number[2] = "3"; // number of phases: 1 or 3
 char sma_id[17] = "";
+char tibber_url[32] = "x.x.x.x"; // IP of TibberPulse
+char tibber_user[32] = "admin"; // fixed user
+char tibber_password[32] = "xxxx-xxxx"; // replace with password printed on Tibbel-Pulse-Adapter
+char tibber_rpc[32] = "/data.json?node_id=1"; // fixed rpc path
 
 IPAddress modbus_ip;
 ModbusIP modbus1;
@@ -95,6 +101,7 @@ bool dataSMA = false;
 bool dataSHRDZM = false;
 bool dataHTTP = false;
 bool dataSUNSPEC = false;
+bool dataTIBBERPULSE = false;
 
 struct PowerData {
   double current;
@@ -997,6 +1004,112 @@ void queryHTTP() {
   http.end();
 }
 
+// functions for TibberPulse
+double tibber_consumption = 0, tibber_power = 0;
+
+typedef struct {
+  const unsigned char OBIS[6];
+  void (*Handler)();
+} OBISHandler;
+
+// supports currently only:
+// - consumption (OBIS 1-0:1.8.0)
+// - power (OBIS 1-0:16.7.0)
+// this could be extended later if needed for other OBIS codes (at least those used in TibberPulse SML)
+void Consumption() { smlOBISWh(tibber_consumption); }
+void Power() { smlOBISW(tibber_power); }
+
+OBISHandler OBISHandlers[] = {
+  {{0x01, 0x00, 0x01, 0x08, 0x00, 0xff}, &Consumption}, /* 1-0: 1. 8.0*255 (Consumption Total) */
+  {{0x01, 0x00, 0x10, 0x07, 0x00, 0xff}, &Power},       /* 1-0:16. 7.0*255 (power) */
+  {{0, 0}}
+};
+
+enum {
+  SMLPAYLOADMAXSIZE = 300
+};
+byte smlpayload[SMLPAYLOADMAXSIZE]{0};
+
+// TibberPulse Adapter
+// - tested only with EMH eHZB meter
+/// @brief query TibberPulse SML raw message
+/// @return
+bool queryTibberPulse() {
+  bool ret = true;
+  int getlength = 0;
+  DEBUG_SERIAL.print("Querying TibberPulse raw SML: ");
+  String url = "http://";
+  url += String(tibber_url);
+  url += String(tibber_rpc);
+  DEBUG_SERIAL.printf("Tibber URL:%s user:%s \r\n", url.c_str(), tibber_user);
+  http.begin(wifi_client, url);
+  http.setAuthorization(tibber_user, tibber_password);
+  int httpResponseCode = http.GET();
+  if (httpResponseCode > 0) {
+    getlength = http.getSize();
+    DEBUG_SERIAL.printf(" message size=%d\r\n", getlength);
+    if ((getlength > SMLPAYLOADMAXSIZE) || (getlength == 0)) {
+      http.end();
+      return false;
+    }
+    WiFiClient *w = http.getStreamPtr();
+    w->readBytes(smlpayload, getlength);
+
+    // TibberPulse Bridge tested only with EMH eHZB-W22E8-0LHP0-D6-A5K1 metter -> 248 bytes
+    if (getlength != 248) {
+      DEBUG_SERIAL.printf("ERROR: SML data not in expected length! length=%d \r\n", getlength);
+      // for extra debugging
+      for (int i = 0; i < getlength; i++) {
+        DEBUG_SERIAL.printf("%02xh ", smlpayload[i]);
+      }
+      DEBUG_SERIAL.println();
+      ret = false;
+    } else {
+      int i = 0, iHandler = 0;
+      unsigned char c;
+      sml_states_t s;
+      for (i = 0; i < getlength; ++i) {
+        c = smlpayload[i];
+        s = smlState(c);
+        switch (s) {
+          case SML_START:
+            /* reset local vars */
+            tibber_consumption = 0;
+            tibber_power = 0;
+            break;
+          case SML_LISTEND:
+            for (
+              iHandler = 0;
+              OBISHandlers[iHandler].Handler != 0 && !(smlOBISCheck(OBISHandlers[iHandler].OBIS));
+              iHandler++
+            );
+            if (OBISHandlers[iHandler].Handler != 0) {
+              OBISHandlers[iHandler].Handler();
+            }
+            break;
+          case SML_UNEXPECTED:
+            DEBUG_SERIAL.printf(">>> Unexpected byte >%02X<! <<<\n", smlpayload[i]);
+            break;
+          case SML_FINAL:
+            setEnergyData(tibber_consumption, 0.0); // only input energy from TibberPulse
+            setPowerData(tibber_power);
+            ret = true;
+            break;
+          default:
+            break;
+        }
+      }
+    }
+  } else {
+    DEBUG_SERIAL.printf("TIBBER http GET Request - Error code: %d\n", httpResponseCode);
+    ret = false;
+  }
+  // Free resources
+  http.end();
+
+  return ret;
+}
+
 void WifiManagerSetup() {
   // Set Shelly ID to ESP's MAC address by default
   uint8_t mac[6];
@@ -1027,14 +1140,17 @@ void WifiManagerSetup() {
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
   strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
+  strcpy(tibber_url, preferences.getString("tibber_url", tibber_url).c_str());
+  strcpy(tibber_user, preferences.getString("tibber_user", tibber_user).c_str());
+  strcpy(tibber_password, preferences.getString("tibber_password", tibber_password).c_str());
   
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
-  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
+  WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data<br><code>TIBBERPULSE</code> for TibberPulse", input_type, 40);
   WiFiManagerParameter custom_ntp_server("ntp_server", "<b>NTP server</b><br>for time synchronization", ntp_server, 40);
   WiFiManagerParameter custom_timezone("timezone", "<b>Timezone</b><br>e.g. <code>UTC0</code>, <code>UTC+1</code>, <code>UTC-3</code>, <code>UTC+1CET-1CEST,M3.5.0/02:00:00,M10.5.0/03:00:00</code>", timezone, 64);
   WiFiManagerParameter custom_mqtt_server("server", "<b>Server</b><br>MQTT Server IP, query url for generic HTTP or Modbus TCP server IP for SUNSPEC", mqtt_server, 160);
   WiFiManagerParameter custom_mqtt_port("port", "<b>Port</b><br> for MQTT or Modbus TCP (SUNSPEC)", mqtt_port, 6);
-  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP and SUNSPEC, in milliseconds", query_period, 10);
+  WiFiManagerParameter custom_query_period("query_period", "<b>Query period</b><br>for generic HTTP, SUNSPEC and TIBBERPULSE, in milliseconds", query_period, 10);
   WiFiManagerParameter custom_led_gpio("led_gpio", "<b>GPIO</b><br>of internal LED", led_gpio, 3);
   WiFiManagerParameter custom_led_gpio_i("led_gpio_i", "<b>GPIO is inverted</b><br><code>true</code> or <code>false</code>", led_gpio_i, 6);
   WiFiManagerParameter custom_shelly_mac("mac", "<b>Shelly ID</b><br>12 char hexadecimal, defaults to MAC address of ESP", shelly_mac, 13);
@@ -1055,6 +1171,10 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
   WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. <code>ENERGY.Grid</code>", energy_in_path, 60);
   WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. <code>ENERGY.FeedIn</code>", energy_out_path, 60);
+  WiFiManagerParameter custom_section5("<hr><h3>TibberPulse</h3>");
+  WiFiManagerParameter custom_tibber_url("url", "<b>url</b><br>e.g.:<code>192.168.xx.xx:port</code>", tibber_url, 64);
+  WiFiManagerParameter custom_tibber_user("tibber_user", "<b>user</b><br><code>admin</code>", tibber_user, 16);
+  WiFiManagerParameter custom_tibber_password("tibber_password", "<b>password</b><br>form:<code>xxxx-xxxx</code>", tibber_password, 16);
 
   WiFiManager wifiManager;
   if (!DEBUG) {
@@ -1091,7 +1211,10 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_power_l3_path);
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
-  
+  wifiManager.addParameter(&custom_section5);
+  wifiManager.addParameter(&custom_tibber_url);
+  wifiManager.addParameter(&custom_tibber_user);
+  wifiManager.addParameter(&custom_tibber_password);
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
     DEBUG_SERIAL.println("failed to connect and hit timeout");
@@ -1125,6 +1248,9 @@ void WifiManagerSetup() {
   strcpy(energy_in_path, custom_energy_in_path.getValue());
   strcpy(energy_out_path, custom_energy_out_path.getValue());
   strcpy(sma_id, custom_sma_id.getValue());
+  strcpy(tibber_url, custom_tibber_url.getValue());
+  strcpy(tibber_user, custom_tibber_user.getValue());
+  strcpy(tibber_password, custom_tibber_password.getValue());
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
@@ -1150,6 +1276,9 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tenergy_in_path : " + String(energy_in_path));
   DEBUG_SERIAL.println("\tenergy_out_path : " + String(energy_out_path));
   DEBUG_SERIAL.println("\tsma_id : " + String(sma_id));
+  DEBUG_SERIAL.println("\ttibber_url:" + String(tibber_url));
+  DEBUG_SERIAL.println("\ttibber_user:" + String(tibber_user));
+  DEBUG_SERIAL.println("\ttibber_password:" + String(tibber_password));
 
   if (strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
@@ -1163,6 +1292,9 @@ void WifiManagerSetup() {
   } else if (strcmp(input_type, "SUNSPEC") == 0) {
     dataSUNSPEC = true;
     DEBUG_SERIAL.println("Enabling SUNSPEC data input");
+  } else if (strcmp(input_type, "TIBBERPULSE") == 0) {
+    dataTIBBERPULSE = true;
+    DEBUG_SERIAL.println("Enabling TIBBERPULSE data input");
   } else {
     dataMQTT = true;
     DEBUG_SERIAL.println("Enabling MQTT data input");
@@ -1199,6 +1331,9 @@ void WifiManagerSetup() {
     preferences.putString("energy_in_path", energy_in_path);
     preferences.putString("energy_out_path", energy_out_path);
     preferences.putString("sma_id", sma_id);
+    preferences.putString("tibber_url", tibber_url);
+    preferences.putString("tibber_user", tibber_user);
+    preferences.putString("tibber_password", tibber_password);
     wifiManager.reboot();
   }
   DEBUG_SERIAL.print("local ip: ");
@@ -1435,6 +1570,12 @@ void loop() {
     if (currentMillis - startMillis >= period) {
       queryHTTP();
       startMillis = currentMillis;
+    }
+  }
+  if (dataTIBBERPULSE) {
+    if (currentMillis - startMillis_tibberpulse >= period){
+      queryTibberPulse();
+      startMillis_tibberpulse = currentMillis;
     }
   }
   handleblinkled();

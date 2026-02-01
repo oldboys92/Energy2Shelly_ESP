@@ -2,7 +2,7 @@
 
 ### Getting started
 This is a Shelly Pro 3EM Emulator running on ESP8266 or ESP32 using various input sources for power data.<br>
-This can be used for zero feed-in with Hoymiles MS-A2 and Marstek Venus (testers needed!).
+This can be used for zero feed-in with Hoymiles MS-A2, Growatt NEXA 2000 and Marstek Venus (testers needed!).
 
 Kudos to @sdeigms excellent work at https://github.com/sdeigm/uni-meter which made this port easily possible.<br>
 SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
@@ -45,11 +45,18 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
   - <code>SMA</code>
     - SMA Energy Meter or Home Manager UDP multicast data; if you have multiple SMA energy meters you can optionally provide the serial number of the source you want to use in the configuration options
   - <code>SHRDZM</code>
-      - SHRDZM smart meter interface (common in Austria) with UDP unicast data; please enable UDP broadcasts to the IP of the ESP and port 9522 within SHRDZM
+    - SHRDZM smart meter interface (common in Austria) with UDP unicast data; please enable UDP broadcasts to the IP of the ESP and port 9522 within SHRDZM
   - <code>HTTP</code>
-      - a generic HTTP input; enter a query URL in the second parameter field which delivers JSON data and define at least the JSON Path for total power. For full details on JSONPath configuration, check the section on MQTT above.<br>
+    - a generic HTTP input; enter a query URL in the second parameter field which delivers JSON data and define at least the JSON Path for total power. For full details on JSONPath configuration, check the section on MQTT above.<br>
   - <code>SUNSPEC</code>
-      - generic SUNSPEC register data polling via Modbus TCP; use server for address of Modbus device (e.g. Kostal Smart energy meter), port for Modbus TCP port (usually 502) and Modbus device ID for the unit ID (71 for KSEM)
+    - generic SUNSPEC register data polling via Modbus TCP; use server for address of Modbus device (e.g. Kostal Smart energy meter), port for Modbus TCP port (usually 502) and Modbus device ID for the unit ID (71 for KSEM)
+  - <code>TIBBERPULSE</code>
+    - support for Tibber Pulse polling meter data from local (see more bellow). The ESP will poll power data according to the pooling interval defined in Settings
+    >[!TIP] Tibber Pulse must be configured to deliver power data via local network (not via Tibber Cloud API). Read here how to setup your Tibber Pulse for local aceess:
+    > - https://github.com/marq24/ha-tibber-pulse-local#preparation-enabling-the-web-frontend-of-the-tibber-pulse-bridge-required
+    > - for further Tibber Pulse informations, see https://github.com/ProfDrYoMan/tibber_pulse_local
+    
+    >[!WARNING] Tested currently only with an EMH eHZB meter connected to Tibber Pulse. You might need to adjust the SML parsing in the source code for other meter types. PRs are welcome.
 
   ### Here are some sample generic HTTP query paths for common devices:
   - Fronius: <code>http://IP-address/solar_api/v1/GetMeterRealtimeData.cgi?Scope=System</code>
