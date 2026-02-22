@@ -69,7 +69,8 @@ char modbus_port[6] = "502";
 char modbus_dev[10] = "71"; // default for KSEM
 // SMA related
 char sma_id[17] = "";
-char tibber_url[32] = "x.x.x.x"; // IP of TibberPulse
+// Tibber related
+char tibber_url[32] = "x.x.x.x[:xxxx]"; // IP of TibberPulse
 char tibber_user[32] = "admin"; // fixed user
 char tibber_password[32] = "xxxx-xxxx"; // replace with password printed on Tibbel-Pulse-Adapter
 char tibber_rpc[32] = "/data.json?node_id=1"; // fixed rpc path
@@ -1077,13 +1078,13 @@ bool queryTibberPulse() {
   String url = "http://";
   url += String(tibber_url);
   url += String(tibber_rpc);
-  DEBUG_SERIAL.printf("Tibber URL:%s user:%s \r\n", url.c_str(), tibber_user);
+  DEBUG_SERIAL.printf("URL:%s, user:%s\r\n", url.c_str(), tibber_user);
   http.begin(wifi_client, url);
   http.setAuthorization(tibber_user, tibber_password);
   int httpResponseCode = http.GET();
   if (httpResponseCode > 0) {
     getlength = http.getSize();
-    DEBUG_SERIAL.printf(" message size=%d\r\n", getlength);
+    DEBUG_SERIAL.printf("Response message size=%d\r\n", getlength);
     if ((getlength > SMLPAYLOADMAXSIZE) || (getlength == 0)) {
       http.end();
       return false;
@@ -1137,7 +1138,7 @@ bool queryTibberPulse() {
       }
     }
   } else {
-    DEBUG_SERIAL.printf("TIBBER http GET Request - Error code: %d\n", httpResponseCode);
+    DEBUG_SERIAL.printf("HTTP request failed, error code: %d\n", httpResponseCode);
     ret = false;
   }
   // Free resources
@@ -1184,6 +1185,7 @@ void WifiManagerSetup() {
   strcpy(power_l3_path, preferences.getString("power_l3_path", power_l3_path).c_str());
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
+  // TibberPulse settings
   strcpy(tibber_url, preferences.getString("tibber_url", tibber_url).c_str());
   strcpy(tibber_user, preferences.getString("tibber_user", tibber_user).c_str());
   strcpy(tibber_password, preferences.getString("tibber_password", tibber_password).c_str());
@@ -1198,6 +1200,7 @@ void WifiManagerSetup() {
     <option value="SHRDZM">SHRDZM UDP</option>
     <option value="HTTP">generic HTTP input</option>
     <option value="SUNSPEC">SUNSPEC via Modbus TCP</option>
+    <option value="TIBBERPULSE">Tibber Pulse local</option>
   </select>
   <script>
   window.addEventListener('DOMContentLoaded', () => {
@@ -1260,6 +1263,11 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_modbus_server("modbus_server", "<b>Host IP</b>", modbus_server_ip, 16);
   WiFiManagerParameter custom_modbus_port("modbus_port", "<b>Port</b>", modbus_port, 6);
   WiFiManagerParameter custom_modbus_dev("modbus_dev", "<b>Modbus device ID</b><br><code>71</code> for Kostal SEM", modbus_dev, 60);
+  // TibberPulse section
+  WiFiManagerParameter custom_section_tibberpulse("<div id=\"TIBBERPULSE\" style=\"display:none\"><h3>TibberPulse options</h3>");
+  WiFiManagerParameter custom_tibber_url("tibber_url", "<b>Hostname/IP[:port]</b> (e.g.: <code>192.168.0.1:8080</code>)", tibber_url, 64);
+  WiFiManagerParameter custom_tibber_user("tibber_user", "<b>User</b> (defaults to: <code>admin</code>)", tibber_user, 16);
+  WiFiManagerParameter custom_tibber_password("tibber_password", "<b>Password</b> (as printed on bridge device: <code>xxxx-xxxx</code>)", tibber_password, 10, "type='password'");
   // JSON paths for MQTT and HTTP
   WiFiManagerParameter custom_section_jsonpath("<div id=\"JSONPATH\" style=\"display:none\"><h4>JSON paths for MQTT and HTTP input</h4>");
   WiFiManagerParameter custom_power_path("power_path", "<b>Total power JSON path</b><br>e.g. <code>ENERGY.Power</code> or <code>TRIPHASE</code> for tri-phase data", power_path, 60);
@@ -1269,10 +1277,6 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>optional", power_l3_path, 60);
   WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. <code>ENERGY.Grid</code>", energy_in_path, 60);
   WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. <code>ENERGY.FeedIn</code>", energy_out_path, 60);
-  WiFiManagerParameter custom_section5("<hr><h3>TibberPulse</h3>");
-  WiFiManagerParameter custom_tibber_url("url", "<b>url</b><br>e.g.:<code>192.168.xx.xx:port</code>", tibber_url, 64);
-  WiFiManagerParameter custom_tibber_user("tibber_user", "<b>user</b><br><code>admin</code>", tibber_user, 16);
-  WiFiManagerParameter custom_tibber_password("tibber_password", "<b>password</b><br>form:<code>xxxx-xxxx</code>", tibber_password, 16);
 
   WiFiManagerParameter custom_sectionx_end("</div>");
 
@@ -1318,6 +1322,12 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_modbus_port);
   wifiManager.addParameter(&custom_modbus_dev);
   wifiManager.addParameter(&custom_sectionx_end);
+  // TibberPulse section
+  wifiManager.addParameter(&custom_section_tibberpulse);
+  wifiManager.addParameter(&custom_tibber_url);
+  wifiManager.addParameter(&custom_tibber_user);
+  wifiManager.addParameter(&custom_tibber_password);
+  wifiManager.addParameter(&custom_sectionx_end);
   // JSON path section for MQTT and HTTP
   wifiManager.addParameter(&custom_section_jsonpath);
   wifiManager.addParameter(&custom_power_path);
@@ -1328,10 +1338,6 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
   wifiManager.addParameter(&custom_sectionx_end);
-  wifiManager.addParameter(&custom_section5);
-  wifiManager.addParameter(&custom_tibber_url);
-  wifiManager.addParameter(&custom_tibber_user);
-  wifiManager.addParameter(&custom_tibber_password);
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
     DEBUG_SERIAL.println("failed to connect and hit timeout");
@@ -1367,6 +1373,10 @@ void WifiManagerSetup() {
   strcpy(modbus_server_ip, custom_modbus_server.getValue());
   strcpy(modbus_port, custom_modbus_port.getValue());
   strcpy(modbus_dev, custom_modbus_dev.getValue());
+  // TibberPulse
+  strcpy(tibber_url, custom_tibber_url.getValue());
+  strcpy(tibber_user, custom_tibber_user.getValue());
+  strcpy(tibber_password, custom_tibber_password.getValue());
   // JSON paths for MQTT and HTTP
   strcpy(power_path, custom_power_path.getValue());
   strcpy(pwr_export_path, custom_pwr_export_path.getValue());
@@ -1375,9 +1385,6 @@ void WifiManagerSetup() {
   strcpy(power_l3_path, custom_power_l3_path.getValue());
   strcpy(energy_in_path, custom_energy_in_path.getValue());
   strcpy(energy_out_path, custom_energy_out_path.getValue());
-  strcpy(tibber_url, custom_tibber_url.getValue());
-  strcpy(tibber_user, custom_tibber_user.getValue());
-  strcpy(tibber_password, custom_tibber_password.getValue());
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("  ntp_server: " + String(ntp_server));
@@ -1403,6 +1410,10 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("    - modbus_server" + String(modbus_server_ip));
   DEBUG_SERIAL.println("    - modbus_port: " + String(modbus_port));
   DEBUG_SERIAL.println("    - modbus_dev: " + String(modbus_dev));
+  DEBUG_SERIAL.println("  TibberPulse options:");
+  DEBUG_SERIAL.println("    - tibber_url: " + String(tibber_url));
+  DEBUG_SERIAL.println("    - tibber_user: " + String(tibber_user));
+  DEBUG_SERIAL.println("    - tibber_password: " + String(tibber_password));
   DEBUG_SERIAL.println("  JSON paths for MQTT and HTTP:");
   DEBUG_SERIAL.println("    - power_path: " + String(power_path));
   DEBUG_SERIAL.println("    - pwr_export_path: " + String(pwr_export_path));
@@ -1412,9 +1423,6 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("    - energy_in_path: " + String(energy_in_path));
   DEBUG_SERIAL.println("    - energy_out_path: " + String(energy_out_path));
   DEBUG_SERIAL.println("------------------------------");
-  DEBUG_SERIAL.println("\ttibber_url:" + String(tibber_url));
-  DEBUG_SERIAL.println("\ttibber_user:" + String(tibber_user));
-  DEBUG_SERIAL.println("\ttibber_password:" + String(tibber_password));
 
   if (strcmp(input_type, "MQTT") == 0) {
     dataMQTT = true;
