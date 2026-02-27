@@ -1429,7 +1429,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("  TibberPulse options:");
   DEBUG_SERIAL.println("    - tibber_url: " + String(tibber_url));
   DEBUG_SERIAL.println("    - tibber_user: " + String(tibber_user));
-  DEBUG_SERIAL.println("    - tibber_password: " + String(tibber_password));
+  DEBUG_SERIAL.println("    - tibber_password: ********");
   DEBUG_SERIAL.println("  JSON paths for MQTT and HTTP:");
   DEBUG_SERIAL.println("    - power_path: " + String(power_path));
   DEBUG_SERIAL.println("    - pwr_export_path: " + String(pwr_export_path));
@@ -1550,9 +1550,8 @@ void setup(void) {
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", "<html><body><form method='post' accept-charset='UTF-8'><h3>Enter password to put device in configuration mode:</h3><input type='password' name='password'><br/><input type='submit' value='Reset device'></form></body></html>");
-  });
+  server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(200, "text/html", "<html><body><form method='post' accept-charset='UTF-8'><pre>Enter password to put device in configuration mode:<br/><br/><input type='password' name='password'><br/><br/><input type='submit' value='Reset device'></pre></form></body></html>"); });
   server.on("/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
     String password = "";
     if (request->hasParam("password", true)) {
