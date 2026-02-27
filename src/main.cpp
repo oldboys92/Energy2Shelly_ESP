@@ -1279,6 +1279,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter param_tibber_password("tibber_password", "Password <span title=\"as printed on bridge device: xxxx-xxxx\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", tibber_password, 10, "type='password'");
   char buf_tibber_pwd_show_pwd[150];
   sprintf(buf_tibber_pwd_show_pwd, show_pwd_str, "tibber_password");
+  WiFiManagerParameter param_tibber_password_show_password(buf_tibber_pwd_show_pwd);
   // JSON paths for MQTT and HTTP
   WiFiManagerParameter param_section_jsonpath("<div id=\"JSONPATH\" style=\"display:none\"><h5>JSON paths for MQTT and HTTP input</h5>");
   WiFiManagerParameter param_power_path("power_path", "Total power <span title=\"e.g. ENERGY.Power or TRIPHASE for tri-phase data\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", power_path, 150);
@@ -1340,6 +1341,7 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&param_tibber_url);
   wifiManager.addParameter(&param_tibber_user);
   wifiManager.addParameter(&param_tibber_password);
+  wifiManager.addParameter(&param_tibber_password_show_password);
   wifiManager.addParameter(&param_sectionx_end);
   // JSON path section for MQTT and HTTP
   wifiManager.addParameter(&param_section_jsonpath);
