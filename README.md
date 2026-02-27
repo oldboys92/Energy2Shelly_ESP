@@ -2,11 +2,7 @@
 
 ### Getting started
 This is a Shelly Pro 3EM Emulator running on ESP8266 or ESP32 using various input sources for power data.<br>
-<<<<<<< HEAD
-This can be used for zero feed-in with Hoymiles MS-A2, Growatt NEXA 2000 and Marstek Venus (testers needed!).
-=======
 This can be used for zero feed-in with Hoymiles MS-A2, Growatt NOAH/NEXA and Marstek Venus (testers needed!).
->>>>>>> update_shelly_endpoints
 
 Kudos to @sdeigms excellent work at https://github.com/sdeigm/uni-meter which made this port easily possible.<br>
 SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
