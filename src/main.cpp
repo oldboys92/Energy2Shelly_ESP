@@ -27,8 +27,6 @@
 #define DEBUG_SERIAL if(DEBUG)Serial
 
 unsigned long startMillis = 0;
-unsigned long startMillis_sunspec = 0;
-unsigned long startMillis_tibberpulse = 0;
 unsigned long currentMillis;
 
 // for getting time
@@ -237,9 +235,9 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
     default:
       break;
   }
-  DEBUG_SERIAL.print("Total consumption: ");
+  DEBUG_SERIAL.print("Total Consumption (Grid Feed-From)): ");
   DEBUG_SERIAL.print(totalEnergyGridSupply);
-  DEBUG_SERIAL.print(" - Total Grid Feed-In: ");
+  DEBUG_SERIAL.print(" - Total Production (Grid Feed-In)): ");
   DEBUG_SERIAL.println(totalEnergyGridFeedIn);
 }
 
@@ -1241,7 +1239,7 @@ void WifiManagerSetup() {
   WiFiManagerParameter param_reset_password_show_password(buf_rst_pwd_show_pwd);
   WiFiManagerParameter param_ntp_server("ntp_server", "NTP server <span title=\"for time synchronization\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", ntp_server, 40);
   WiFiManagerParameter param_timezone("timezone", "Timezone <span title=\"e.g. UTC0, UTC+1, UTC-3, UTC+1CET-1CEST,M3.5.0/02:00:00,M10.5.0/03:00:00\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", timezone, 64);
-  WiFiManagerParameter param_query_period("query_period", "Query period <span title=\"for generic HTTP and SUNSPEC, in milliseconds\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", query_period, 10);
+  WiFiManagerParameter param_query_period("query_period", "Query period <span title=\"for generic HTTP, SUNSPEC and TIBBERPULSE, in milliseconds\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", query_period, 10);
   WiFiManagerParameter param_led_gpio("led_gpio", "GPIO of internal LED <span title=\"GPIO of internal LED\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", led_gpio, 3);
   WiFiManagerParameter param_led_gpio_i("led_gpio_i", "GPIO is inverted <span title=\"true or false\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", led_gpio_i, 6);
   WiFiManagerParameter param_shelly_mac("shelly_mac", "Shelly ID (12 char hexadecimal) <span title=\"defaults to MAC address of ESP\" style=\"cursor: help;\" aria-label=\"Help\" tabindex=\"0\">(?)</span>", shelly_mac, 13);
@@ -1517,7 +1515,10 @@ void setup(void) {
   //ESP8266
   configTime(timezone, ntp_server);
 #endif
-  getLocalTime(&timeinfo);
+  while (!getLocalTime(&timeinfo)) {
+    DEBUG_SERIAL.println("Waiting for NTP time...");
+    delay(500);
+  }
   DEBUG_SERIAL.print("Current time: ");
   char time_buffer[20];
   strftime(time_buffer, sizeof(time_buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
@@ -1535,6 +1536,8 @@ void setup(void) {
       digitalWrite(led, HIGH);
     }
   }
+
+  // Set up web server and endpoints
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
@@ -1570,11 +1573,12 @@ void setup(void) {
     }
   });
 
+  // Shelly RPC endpoints
+
   server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetConfig();
     request->send(200, "application/json", serJsonResponse);
   });
-
   server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
@@ -1589,17 +1593,14 @@ void setup(void) {
     shellyGetComponents();
     request->send(200, "application/json", serJsonResponse);
   });
-
   server.on("/rpc/Shelly.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
     shellyGetConfig();
     request->send(200, "application/json", serJsonResponse);
   });
-
   server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
     shellyGetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
   });
-
   server.on("/rpc/Shelly.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     shellyGetStatus();
     request->send(200, "application/json", serJsonResponse);
@@ -1609,7 +1610,6 @@ void setup(void) {
     sysGetConfig();
     request->send(200, "application/json", serJsonResponse);
   });
-
   server.on("/rpc/Sys.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     sysGetStatus();
     request->send(200, "application/json", serJsonResponse);
@@ -1658,7 +1658,6 @@ void setup(void) {
   // Set Up HTTP query
   if (dataHTTP) {
     period = atol(query_period);
-    startMillis = millis();
     http.useHTTP10(true);
   }
 
@@ -1700,6 +1699,7 @@ void setup(void) {
   }
 #endif
   DEBUG_SERIAL.println("mDNS responder started");
+  startMillis = millis();
 }
 
 void loop() {
@@ -1730,9 +1730,9 @@ void loop() {
     parseSHRDZM();
   }
   if (dataSUNSPEC) {
-    if (currentMillis - startMillis_sunspec >= period) {
-       parseSUNSPEC();
-      startMillis_sunspec = currentMillis;
+    if (currentMillis - startMillis >= period) {
+      parseSUNSPEC();
+      startMillis = currentMillis;
     }
   }
   if (dataHTTP) {
@@ -1742,9 +1742,9 @@ void loop() {
     }
   }
   if (dataTIBBERPULSE) {
-    if (currentMillis - startMillis_tibberpulse >= period){
+    if (currentMillis - startMillis >= period){
       queryTibberPulse();
-      startMillis_tibberpulse = currentMillis;
+      startMillis = currentMillis;
     }
   }
   handleblinkled();
