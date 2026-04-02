@@ -1136,15 +1136,16 @@ OBISHandler OBISHandlers[] = {
   {{0, 0}}
 };
 
+// SML message length tested with following power meters:
 enum {
-  SMLPAYLOADMAXSIZE = 300
+  // EMH eHZB
+  SML_PM_EMH_EHZB = 248,
+  // eBZ DD3
+  SML_PM_EBZ_DD3 = 396,
+  SMLPAYLOADMAXSIZE = 500
 };
 byte smlpayload[SMLPAYLOADMAXSIZE]{0};
 
-// TibberPulse Adapter
-// - tested only with EMH eHZB meter
-/// @brief query TibberPulse SML raw message
-/// @return
 bool queryTibberPulse() {
   bool ret = true;
   int getlength = 0;
@@ -1165,9 +1166,9 @@ bool queryTibberPulse() {
     }
     WiFiClient *w = http.getStreamPtr();
     w->readBytes(smlpayload, getlength);
-
-    // TibberPulse Bridge tested only with EMH eHZB-W22E8-0LHP0-D6-A5K1 metter -> 248 bytes
-    if (getlength != 248) {
+    // the OBIS codes for consumption (1-0:1.8.0*255) and power (1-0:16.7.0*255) are the same,
+    // the SML message length might be different, but reading these should still work
+    if (getlength != SML_PM_EMH_EHZB && getlength != SML_PM_EBZ_DD3) {
       DEBUG_SERIAL.printf("ERROR: SML data not in expected length! length=%d \r\n", getlength);
       // for extra debugging
       for (int i = 0; i < getlength; i++) {
@@ -1632,13 +1633,10 @@ void setup(void) {
     request->send(200, "text/html", "<html><body><form method='post' accept-charset='UTF-8'><pre>Enter \"Reset password\" to put device in configuration mode:<br/><br/><input type='password' name='password'> <input type='submit' value='Reset device'></pre></form></body></html>");
   });
   server.on("/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
-    String password = "";
     if (request->hasParam("password", true)) {
       AsyncWebServerResponse *response;
-      const AsyncWebParameter *p = request->getParam("password", true);
-      password = p->value();
-      String storedPassword = preferences.getString("reset_password");
-      if (password == storedPassword) {
+      String password = request->getParam("password", true)->value();
+      if (password == preferences.getString("reset_password")) {
         shouldResetConfig = true;
         response = request->beginResponse(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
       } else {
