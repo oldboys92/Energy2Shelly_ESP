@@ -383,7 +383,7 @@ void sysGetStatus() {
   jsonResponse["restart_required"] = false;
   jsonResponse["time"] = time_buffer;
   jsonResponse["unixtime"] = now;
-  jsonResponse["last_sync_ts"] = nullptr;
+  jsonResponse["last_sync_ts"] = now;
   jsonResponse["uptime"] = millis() / 1000;
   jsonResponse["ram_size"] = ram_total;
   jsonResponse["ram_free"] = ESP.getFreeHeap();
@@ -394,7 +394,7 @@ void sysGetStatus() {
   jsonResponse["schedule_rev"] = 0;
   jsonResponse["webhook_rev"] = 0;
   jsonResponse["btrelay_rev"] = 0;
-  jsonResponse["avail_updates"].to<JsonObject>();
+  jsonResponse["available_updates"]["beta"]["version"] = "1.7.5-beta1";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.print("sysGetStatus: ");
   DEBUG_SERIAL.println(serJsonResponse);
@@ -424,9 +424,11 @@ void EMGetStatus() {
   jsonResponse["c_aprt_power"] = serialized(String(PhasePower[2].apparentPower, 2));
   jsonResponse["c_pf"] = serialized(String(PhasePower[2].powerFactor, 2));
   jsonResponse["c_freq"] = serialized(String(PhasePower[2].frequency, 2));
+  jsonResponse["n_current"] = nullptr;
   jsonResponse["total_current"] = serialized(String((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / defaultVoltage, 2));
   jsonResponse["total_act_power"] = serialized(String(PhasePower[0].power + PhasePower[1].power + PhasePower[2].power, 2));
   jsonResponse["total_aprt_power"] = serialized(String(PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower, 2));
+  jsonResponse["user_calibrated_phase"] = JsonArray();
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.print("EMGetStatus: ");
   DEBUG_SERIAL.println(serJsonResponse);
@@ -534,54 +536,31 @@ void shellyGetStatus() {
 #endif
 
   jsonResponse["ble"].to<JsonObject>();
-
+  jsonResponse["bthome"].to<JsonObject>();
   jsonResponse["cloud"]["connected"] = false;
-  jsonResponse["mqtt"]["connected"] = false;
-
   EMGetStatus();
   jsonResponse["em:0"] = serialized(serJsonResponse);
   EMDataGetStatus();
   jsonResponse["emdata:0"] = serialized(serJsonResponse);
-
-  // temperature is not really in the examples, but makes sense to include it
-  JsonObject temp = jsonResponse["tmp"].to<JsonObject>();
-  temp["tC"] = serialized(String(temperature, 2));
-  temp["tF"] = serialized(String((temperature * 9.0 / 5.0) + 32.0, 2));
-
+  JsonObject eth = jsonResponse["eth"].to<JsonObject>();
+  eth["ip"] = nullptr;
+  eth["ip6"] = nullptr;
+  jsonResponse["modbus"].to<JsonObject>();
+  jsonResponse["mqtt"]["connected"] = false;
   sysGetStatus();
   jsonResponse["sys"] = serialized(serJsonResponse);
-
+  JsonObject temp = jsonResponse["temperature:0"].to<JsonObject>();
+  temp["id"] = 0;
+  temp["tC"] = serialized(String(temperature, 2));
+  temp["tF"] = serialized(String((temperature * 9.0 / 5.0) + 32.0, 2));
   jsonResponse["wifi"]["sta_ip"] = WiFi.localIP().toString();
-  jsonResponse["wifi"]["status"] = (WiFi.status() == WL_CONNECTED);
-  jsonResponse["wifi"]["ssid"] = WiFi.SSID();
-  jsonResponse["wifi"]["rssi"] = WiFi.RSSI();
+  jsonResponse["wifi"]["status"] = (WiFi.status() == WL_CONNECTED) ? "got ip" : "connecting";
+  jsonResponse["wifi"]["ssid"] = (WiFi.status() == WL_CONNECTED) ? WiFi.SSID() : "null";
+  jsonResponse["wifi"]["bssid"] = (WiFi.status() == WL_CONNECTED) ? WiFi.BSSIDstr() : "null";
+  jsonResponse["wifi"]["rssi"] = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : 0;
+  jsonResponse["wifi"]["sta_ip6"].to<JsonArray>();
+  jsonResponse["ws"]["connected"] = false;
 
-  // these were in the uni-meter output, but not in the Shelly examples
-  // will keep them commented out for possible future use
-  //
-  // jsonResponse["sys"]["mac"] = mac.c_str();
-  // jsonResponse["sys"]["restart_required"] = false;
-  // jsonResponse["sys"]["time"] = time_buffer;
-  // jsonResponse["sys"]["unixtime"] = now;
-  // jsonResponse["sys"]["last_sync_ts"] = nullptr;
-  // jsonResponse["sys"]["uptime"] = millis() / 1000;
-  // jsonResponse["sys"]["ram_size"] = ram_total;
-  // jsonResponse["sys"]["ram_free"] = ESP.getFreeHeap();
-  // jsonResponse["sys"]["fs_size"] = ESP.getFlashChipSize();
-  // jsonResponse["sys"]["fs_free"] = ESP.getFreeSketchSpace();
-  // jsonResponse["sys"]["cfg_rev"] = 10;
-  // jsonResponse["sys"]["kvs_rev"] = 2725;
-  //
-  // jsonResponse["serial"] = 1;
-  // jsonResponse["has_update"] = false;
-  //
-  // jsonResponse["temperature"] = serialized(String(temperature, 2));
-  // jsonResponse["overtemperature"] = false;
-  // temp["is_valid"] = true;
-  // JsonObject modbus = jsonResponse["modbus"].to<JsonObject>();
-  // modbus["enabled"] = false;
-  // jsonResponse["total_power"] = serialized(String(PhasePower[0].power + PhasePower[1].power + PhasePower[2].power, 2));
-  // jsonResponse["fs_mounted"] = true;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.print("shellyGetStatus: ");
   DEBUG_SERIAL.println(serJsonResponse);
@@ -613,20 +592,10 @@ void wifiGetStatus() {
   bool wifiConnected = (WiFi.status() == WL_CONNECTED);
   JsonDocument jsonResponse;
   jsonResponse["sta_ip"] = WiFi.localIP() ? WiFi.localIP().toString() : "null";
-  switch (WiFi.status()) {
-    case WL_CONNECTED:
-      jsonResponse["status"] = "connected";
-      break;
-    case WL_DISCONNECTED:
-      jsonResponse["status"] = "disconnected";
-      break;
-    default:
-      jsonResponse["status"] = WiFi.localIP() ? "got ip" : "connecting";
-      break;
-  }
+  jsonResponse["status"] = wifiConnected ? "got ip" : "connecting";
   jsonResponse["ssid"] = wifiConnected ? WiFi.SSID() : "null";
   jsonResponse["bssid"] = wifiConnected ? WiFi.BSSIDstr() : "null";
-  jsonResponse["rssi"] = WiFi.RSSI();
+  jsonResponse["rssi"] = wifiConnected ? WiFi.RSSI() : 0;
   jsonResponse["ap_client_count"] = 0; // not really relevant, as we are not in AP mode, but included for completeness
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.print("wifiGetStatus: ");
@@ -1116,7 +1085,7 @@ void queryHTTP() {
 }
 
 // functions for TibberPulse
-double tibber_consumption = 0, tibber_power = 0;
+double tibber_consumption = 0, tibber_production = 0, tibber_power = 0;
 
 typedef struct {
   const unsigned char OBIS[6];
@@ -1125,13 +1094,16 @@ typedef struct {
 
 // supports currently only:
 // - consumption (OBIS 1-0:1.8.0)
-// - power (OBIS 1-0:16.7.0)
+// - production  (OBIS 1-0:2.8.0)
+// - power       (OBIS 1-0:16.7.0)
 // this could be extended later if needed for other OBIS codes (at least those used in TibberPulse SML)
 void Consumption() { smlOBISWh(tibber_consumption); }
+void Production() { smlOBISWh(tibber_production); }
 void Power() { smlOBISW(tibber_power); }
 
 OBISHandler OBISHandlers[] = {
   {{0x01, 0x00, 0x01, 0x08, 0x00, 0xff}, &Consumption}, /* 1-0: 1. 8.0*255 (Consumption Total) */
+  {{0x01, 0x00, 0x02, 0x08, 0x00, 0xff}, &Production},  /* 1-0: 2. 8.0*255 (Production Total) */
   {{0x01, 0x00, 0x10, 0x07, 0x00, 0xff}, &Power},       /* 1-0:16. 7.0*255 (power) */
   {{0, 0}}
 };
@@ -1187,6 +1159,7 @@ bool queryTibberPulse() {
           case SML_START:
             /* reset local vars */
             tibber_consumption = 0;
+            tibber_production = 0;
             tibber_power = 0;
             break;
           case SML_LISTEND:
@@ -1203,7 +1176,7 @@ bool queryTibberPulse() {
             DEBUG_SERIAL.printf(">>> Unexpected byte >%02X<! <<<\n", smlpayload[i]);
             break;
           case SML_FINAL:
-            setEnergyData(tibber_consumption, 0.0); // only input energy from TibberPulse
+            setEnergyData(tibber_consumption, tibber_production); // input and output energy from TibberPulse
             setPowerData(tibber_power);
             ret = true;
             break;
@@ -1267,9 +1240,7 @@ void WifiManagerSetup() {
   strcpy(tibber_password, preferences.getString("tibber_password", tibber_password).c_str());
 
   const char *dd_select_str = R"(
-  <br/>
-  <hr>
-  <br/>
+  <br/><hr><br/>
   <label for='datasource'>Datasource</label>
   <select name="datasource" id="datasource">
     <option value=""></option>
@@ -1303,7 +1274,7 @@ void WifiManagerSetup() {
   });
   </script>
   )";
-  char buffer_datasource[1500];
+  char buffer_datasource[1750];
   sprintf(buffer_datasource, dd_select_str, input_type);
 
   const char *show_pwd_str = "<input type=\"checkbox\" onclick=\"t('%s')\">&nbsp;<label>Show password</label><br/>";
