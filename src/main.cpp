@@ -235,9 +235,9 @@ void setEnergyData(double totalEnergyGridSupply, double totalEnergyGridFeedIn) {
     default:
       break;
   }
-  DEBUG_SERIAL.print("Total Consumption (Grid Feed-From)): ");
+  DEBUG_SERIAL.print("Total Consumption (Grid Feed-From): ");
   DEBUG_SERIAL.print(totalEnergyGridSupply);
-  DEBUG_SERIAL.print(" - Total Production (Grid Feed-In)): ");
+  DEBUG_SERIAL.print(" - Total Production (Grid Feed-In): ");
   DEBUG_SERIAL.println(totalEnergyGridFeedIn);
 }
 
