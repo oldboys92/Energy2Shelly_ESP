@@ -1601,19 +1601,30 @@ void setup(void) {
   });
 
   server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/html", "<html><body><form method='post' accept-charset='UTF-8'><pre>Enter \"Reset password\" to put device in configuration mode:<br/><br/><input type='password' name='password'> <input type='submit' value='Reset device'></pre></form></body></html>");
+    if (preferences.isKey("reset_password") && preferences.getString("reset_password").length() > 0) {
+      request->send(200, "text/html", "<html><body><form method='post' accept-charset='UTF-8'><pre>Enter \"Reset password\" to put device in configuration mode:<br/><br/><input type='password' name='password'> <input type='submit' value='Reset device'></pre></form></body></html>");
+    } else {
+      request->send(200, "text/html", "<html><body><form method='post'><pre>Press the button below to put device in configuration mode:<br/><br/><input type='submit' value='Reset device'></pre></form></body></html>");
+    }
   });
   server.on("/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("password", true)) {
-      AsyncWebServerResponse *response;
-      String password = request->getParam("password", true)->value();
-      if (password == preferences.getString("reset_password")) {
-        shouldResetConfig = true;
-        response = request->beginResponse(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
-      } else {
-        response = request->beginResponse(401, "text/plain", "Unauthorized: Invalid reset password.\r\n");
+    if (preferences.isKey("reset_password") && preferences.getString("reset_password").length() > 0) {
+      // Reset password is set, require it to be entered to reset config
+      if (request->hasParam("password", true)) {
+        AsyncWebServerResponse *response;
+        String password = request->getParam("password", true)->value();
+        if (password == preferences.getString("reset_password")) {
+          shouldResetConfig = true;
+          response = request->beginResponse(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
+        } else {
+          response = request->beginResponse(401, "text/plain", "Unauthorized: Invalid reset password.\r\n");
+        }
+        request->send(response);
       }
-      request->send(response);
+    } else {
+      // No reset password set, just reset config
+      shouldResetConfig = true;
+      request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
     }
   });
 
